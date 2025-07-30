@@ -508,7 +508,7 @@ def alpha_041(df):
     return weighted_price - delay(weighted_price, 1)
 
 def alpha_042(df):
-    """(rank((vwap - close)) / rank((vwap + close)))"""
+    """(rank(vwap - close) / rank(vwap + close))"""
     return rank(df['vwap'] - df['close']) / rank(df['vwap'] + df['close'])
 
 def alpha_043(df):
@@ -936,10 +936,339 @@ def alpha_080(df):
     
     return rank(sign_delta) ** rank(corr_high_adv10)
 
-# 由於篇幅限制，這裡只實現前80個因子作為示例
-# 完整的101個因子需要更多空間，建議分批實現
+def alpha_081(df):
+    """((rank(Log(product(((close - open), (close - open)), 14.5864))) < rank(correlation(IndNeutralize(adv20, IndClass.industry), IndNeutralize(adv60, IndClass.industry), 8.4611)))"""
+    # 簡化實現，移除 IndNeutralize 函數
+    close_open_diff = df['close'] - df['open']
+    product_diff = product(close_open_diff, 15)
+    log_product = np.log(product_diff)
+    rank_log = rank(log_product)
+    
+    adv20 = df['volume'].rolling(20).mean()
+    adv60 = df['volume'].rolling(60).mean()
+    corr_adv20_adv60 = correlation(adv20, adv60, 8)
+    rank_corr = rank(corr_adv20_adv60)
+    
+    return rank_log < rank_corr
 
-# 因子字典（前80個）
+def alpha_082(df):
+    """(min(rank(decay_linear(delta(open, 1.46063), 14.8717)), Ts_Rank(decay_linear(correlation(IndNeutralize(volume, IndClass.sector), ((open * 0.634196) + (open * (1 - 0.634196))), 17.4842), 6.92131), 13.4283))"""
+    # 簡化實現，移除 IndNeutralize 函數
+    delta_open = delta(df['open'], 1)
+    decay_delta = decay_linear(delta_open, 15)
+    rank_decay1 = rank(decay_delta)
+    
+    open_weighted = (df['open'] * 0.634196) + (df['open'] * (1 - 0.634196))
+    corr_volume_open = correlation(df['volume'], open_weighted, 17)
+    decay_corr = decay_linear(corr_volume_open, 7)
+    ts_rank_decay = ts_rank(decay_corr, 13)
+    
+    return np.minimum(rank_decay1, ts_rank_decay)
+
+def alpha_083(df):
+    """((rank(delay(((high - low) / (sum(close, 5) / 5)), 2)) * rank(rank(volume))) / (((high - low) / (sum(close, 5) / 5)) / (vwap - close)))"""
+    high_low_diff = df['high'] - df['low']
+    sum_close_5 = ts_sum(df['close'], 5) / 5
+    ratio = high_low_diff / sum_close_5
+    delay_ratio = delay(ratio, 2)
+    rank_delay = rank(delay_ratio)
+    rank_volume = rank(rank(df['volume']))
+    
+    numerator = rank_delay * rank_volume
+    denominator = ratio / (df['vwap'] - df['close'])
+    
+    return numerator / denominator
+
+def alpha_084(df):
+    """(SignedPower(Ts_Rank((vwap - ts_max(vwap, 15.3217)), 20.7127), delta(close, 4.96796)))"""
+    ts_max_vwap = ts_max(df['vwap'], 15)
+    vwap_max_diff = df['vwap'] - ts_max_vwap
+    ts_rank_diff = ts_rank(vwap_max_diff, 21)
+    delta_close = delta(df['close'], 5)
+    
+    return signed_power(ts_rank_diff, delta_close)
+
+def alpha_085(df):
+    """(rank(correlation(((high * 0.876703) + (close * (1 - 0.876703))), adv30, 9.61331))^rank(correlation(Ts_Rank(((high + low) / 2), 3.70596), Ts_Rank(volume, 10.1595), 7.11408)))"""
+    high_close_weighted = (df['high'] * 0.876703) + (df['close'] * (1 - 0.876703))
+    adv30 = df['volume'].rolling(30).mean()
+    corr_weighted_adv30 = correlation(high_close_weighted, adv30, 10)
+    
+    high_low_avg = (df['high'] + df['low']) / 2
+    ts_rank_hl = ts_rank(high_low_avg, 4)
+    ts_rank_volume = ts_rank(df['volume'], 10)
+    corr_ts_rank = correlation(ts_rank_hl, ts_rank_volume, 7)
+    
+    return rank(corr_weighted_adv30) ** rank(corr_ts_rank)
+
+def alpha_086(df):
+    """(Ts_Rank(correlation(close, sum(adv20, 14.7444), 6.00049), 20.4195) < rank(((open + close) - (vwap + open))))"""
+    adv20 = df['volume'].rolling(20).mean()
+    sum_adv20 = ts_sum(adv20, 15)
+    corr_close_sum = correlation(df['close'], sum_adv20, 6)
+    ts_rank_corr = ts_rank(corr_close_sum, 20)
+    
+    open_close_sum = df['open'] + df['close']
+    vwap_open_sum = df['vwap'] + df['open']
+    diff = open_close_sum - vwap_open_sum
+    rank_diff = rank(diff)
+    
+    return ts_rank_corr < rank_diff
+
+def alpha_087(df):
+    """(max(rank(decay_linear(delta(((close * 0.369701) + (vwap * (1 - 0.369701))), 2.72412), 2.72412)), Ts_Rank(decay_linear(abs(correlation(IndNeutralize(adv81, IndClass.industry), close, 13.4139)), 4.39567), 6.74588))"""
+    # 簡化實現，移除 IndNeutralize 函數
+    close_vwap_weighted = (df['close'] * 0.369701) + (df['vwap'] * (1 - 0.369701))
+    delta_weighted = delta(close_vwap_weighted, 3)
+    decay_delta = decay_linear(delta_weighted, 3)
+    rank_decay1 = rank(decay_delta)
+    
+    adv81 = df['volume'].rolling(81).mean()
+    corr_adv81_close = correlation(adv81, df['close'], 13)
+    abs_corr = abs(corr_adv81_close)
+    decay_abs = decay_linear(abs_corr, 4)
+    ts_rank_decay = ts_rank(decay_abs, 7)
+    
+    return np.maximum(rank_decay1, ts_rank_decay)
+
+def alpha_088(df):
+    """(rank(decay_linear(((rank(open, 6.47141) + rank(open, 14.4714)) - (rank(delay(close, 1), 6.47141) + rank(delay(close, 1), 14.4714))), 8.83606)))"""
+    rank_open_6 = rank(df['open'])
+    rank_open_14 = rank(df['open'])
+    delay_close_1 = delay(df['close'], 1)
+    rank_delay_close_6 = rank(delay_close_1)
+    rank_delay_close_14 = rank(delay_close_1)
+    
+    term1 = rank_open_6 + rank_open_14
+    term2 = rank_delay_close_6 + rank_delay_close_14
+    diff = term1 - term2
+    decay_diff = decay_linear(diff, 9)
+    
+    return rank(decay_diff)
+
+def alpha_089(df):
+    """(2 * (rank(decay_linear(correlation(((low + open) - (vwap + close)), delay(close, 1), 6.47141), 8.83606)) - rank(decay_linear(Ts_Rank(Ts_Rank(correlation(IndNeutralize(volume, IndClass.sector), ((open + close) / 2), 6.74425), 6.21089), 5.5375), 2.02764))))"""
+    # 簡化實現，移除 IndNeutralize 函數
+    low_open_sum = df['low'] + df['open']
+    vwap_close_sum = df['vwap'] + df['close']
+    diff1 = low_open_sum - vwap_close_sum
+    delay_close_1 = delay(df['close'], 1)
+    corr_diff_delay = correlation(diff1, delay_close_1, 6)
+    decay_corr = decay_linear(corr_diff_delay, 9)
+    rank_decay1 = rank(decay_corr)
+    
+    open_close_avg = (df['open'] + df['close']) / 2
+    corr_volume_avg = correlation(df['volume'], open_close_avg, 7)
+    ts_rank_corr = ts_rank(corr_volume_avg, 6)
+    ts_rank_ts_rank = ts_rank(ts_rank_corr, 6)
+    decay_ts_rank = decay_linear(ts_rank_ts_rank, 5)
+    rank_decay2 = rank(decay_ts_rank)
+    
+    return 2 * (rank_decay1 - rank_decay2)
+
+def alpha_090(df):
+    """((rank((close - ts_max(close, 4.66719)))^Ts_Rank(correlation(IndNeutralize(adv40, IndClass.subindustry), low, 5.38375), 3.21856))"""
+    # 簡化實現，移除 IndNeutralize 函數
+    ts_max_close = ts_max(df['close'], 5)
+    close_max_diff = df['close'] - ts_max_close
+    rank_diff = rank(close_max_diff)
+    
+    adv40 = df['volume'].rolling(40).mean()
+    corr_adv40_low = correlation(adv40, df['low'], 5)
+    ts_rank_corr = ts_rank(corr_adv40_low, 3)
+    
+    return rank_diff ** ts_rank_corr
+
+def alpha_091(df):
+    """((Ts_Rank((close - ((high + low) / 2)), 9.06131) + Ts_Rank(correlation(IndNeutralize(adv40, IndClass.subindustry), IndNeutralize(close, IndClass.subindustry), 9.74441), 17.7982)) < (rank(((max(open, 5))^2)) + Ts_Rank(decay_linear(((high + low) / 2), 19.0451), 7.06036)))"""
+    # 簡化實現，移除 IndNeutralize 函數
+    high_low_avg = (df['high'] + df['low']) / 2
+    close_hl_diff = df['close'] - high_low_avg
+    ts_rank_diff = ts_rank(close_hl_diff, 9)
+    
+    adv40 = df['volume'].rolling(40).mean()
+    corr_adv40_close = correlation(adv40, df['close'], 10)
+    ts_rank_corr = ts_rank(corr_adv40_close, 18)
+    
+    term1 = ts_rank_diff + ts_rank_corr
+    
+    max_open_5 = np.maximum(df['open'], 5)
+    max_open_squared = max_open_5 ** 2
+    rank_max_open = rank(max_open_squared)
+    
+    decay_hl_avg = decay_linear(high_low_avg, 19)
+    ts_rank_decay = ts_rank(decay_hl_avg, 7)
+    
+    term2 = rank_max_open + ts_rank_decay
+    
+    return term1 < term2
+
+def alpha_092(df):
+    """min(Ts_Rank(decay_linear(((((high + low) / 2) + close) < (high + low)), 9.69216), 4.9759), Ts_Rank(decay_linear(correlation(Ts_Rank(low, 8.62591), Ts_Rank(adv30, 17.5206), 5.89503), 12.6052), 12.8281))"""
+    high_low_avg = (df['high'] + df['low']) / 2
+    hl_avg_close = high_low_avg + df['close']
+    high_low_sum = df['high'] + df['low']
+    condition = hl_avg_close < high_low_sum
+    decay_condition = decay_linear(condition.astype(float), 10)
+    ts_rank_decay1 = ts_rank(decay_condition, 5)
+    
+    adv30 = df['volume'].rolling(30).mean()
+    ts_rank_low = ts_rank(df['low'], 9)
+    ts_rank_adv30 = ts_rank(adv30, 18)
+    corr_ts_rank = correlation(ts_rank_low, ts_rank_adv30, 6)
+    decay_corr = decay_linear(corr_ts_rank, 13)
+    ts_rank_decay2 = ts_rank(decay_corr, 13)
+    
+    return np.minimum(ts_rank_decay1, ts_rank_decay2)
+
+def alpha_093(df):
+    """(Ts_Rank(decay_linear(correlation(IndNeutralize(volume, IndClass.subindustry), ((low * 0.721544) + (low * (1 - 0.721544))), 6.00052), 5.2467), 2.88563) - Ts_Rank(decay_linear(Ts_Rank(correlation(Ts_Rank(close, 8.62591), Ts_Rank(adv60, 17.5206), 8.43296), 8.17068), 6.02093), 4.88563))"""
+    # 簡化實現，移除 IndNeutralize 函數
+    low_weighted = (df['low'] * 0.721544) + (df['low'] * (1 - 0.721544))
+    corr_volume_low = correlation(df['volume'], low_weighted, 6)
+    decay_corr = decay_linear(corr_volume_low, 5)
+    ts_rank_decay1 = ts_rank(decay_corr, 3)
+    
+    adv60 = df['volume'].rolling(60).mean()
+    ts_rank_close = ts_rank(df['close'], 9)
+    ts_rank_adv60 = ts_rank(adv60, 18)
+    corr_ts_rank = correlation(ts_rank_close, ts_rank_adv60, 8)
+    ts_rank_corr = ts_rank(corr_ts_rank, 8)
+    decay_ts_rank = decay_linear(ts_rank_corr, 6)
+    ts_rank_decay2 = ts_rank(decay_ts_rank, 5)
+    
+    return ts_rank_decay1 - ts_rank_decay2
+
+def alpha_094(df):
+    """((rank((vwap - ts_min(vwap, 11.5783)))^Ts_Rank(correlation(Ts_Rank(vwap, 19.6462), Ts_Rank(adv60, 4.02992), 4.6566), 2.96556))"""
+    ts_min_vwap = ts_min(df['vwap'], 12)
+    vwap_min_diff = df['vwap'] - ts_min_vwap
+    rank_diff = rank(vwap_min_diff)
+    
+    adv60 = df['volume'].rolling(60).mean()
+    ts_rank_vwap = ts_rank(df['vwap'], 20)
+    ts_rank_adv60 = ts_rank(adv60, 4)
+    corr_ts_rank = correlation(ts_rank_vwap, ts_rank_adv60, 5)
+    ts_rank_corr = ts_rank(corr_ts_rank, 3)
+    
+    return rank_diff ** ts_rank_corr
+
+def alpha_095(df):
+    """(rank((open - ts_min(open, 12.4105))) < Ts_Rank((rank(correlation(sum(((high + low) / 2), 19.1351), sum(adv40, 19.1351), 12.8742))^5), 11.7584))"""
+    ts_min_open = ts_min(df['open'], 12)
+    open_min_diff = df['open'] - ts_min_open
+    rank_diff = rank(open_min_diff)
+    
+    high_low_avg = (df['high'] + df['low']) / 2
+    sum_hl_avg = ts_sum(high_low_avg, 19)
+    adv40 = df['volume'].rolling(40).mean()
+    sum_adv40 = ts_sum(adv40, 19)
+    corr_sum = correlation(sum_hl_avg, sum_adv40, 13)
+    rank_corr = rank(corr_sum)
+    rank_corr_power = rank_corr ** 5
+    ts_rank_power = ts_rank(rank_corr_power, 12)
+    
+    return rank_diff < ts_rank_power
+
+def alpha_096(df):
+    """(max(Ts_Rank(decay_linear(correlation(rank(vwap), rank(volume), 3.83878), 4.16783), 8.38151), Ts_Rank(decay_linear(Ts_Rank(((Ts_Rank(correlation(IndNeutralize(low, IndClass.sector), adv81, 8.14941), 2.72412)^5), 13.4663), 6.78068), 4.43831))"""
+    # 簡化實現，移除 IndNeutralize 函數
+    corr_rank_vwap_volume = correlation(rank(df['vwap']), rank(df['volume']), 4)
+    decay_corr = decay_linear(corr_rank_vwap_volume, 4)
+    ts_rank_decay1 = ts_rank(decay_corr, 8)
+    
+    adv81 = df['volume'].rolling(81).mean()
+    corr_low_adv81 = correlation(df['low'], adv81, 8)
+    ts_rank_corr = ts_rank(corr_low_adv81, 3)
+    ts_rank_power = ts_rank_corr ** 5
+    ts_rank_power_rank = ts_rank(ts_rank_power, 13)
+    decay_ts_rank = decay_linear(ts_rank_power_rank, 7)
+    ts_rank_decay2 = ts_rank(decay_ts_rank, 4)
+    
+    return np.maximum(ts_rank_decay1, ts_rank_decay2)
+
+def alpha_097(df):
+    """(max(rank(decay_linear(delta(IndNeutralize(((low * 0.721001) + (vwap * (1 - 0.721001))), IndClass.industry), 3.3705), 6.7456)), Ts_Rank(decay_linear(Ts_Rank(correlation(Ts_Rank(low, 8.16123), Ts_Rank(adv60, 20.0711), 8.8926), 6.99510), 7.44019), 3.7154))"""
+    # 簡化實現，移除 IndNeutralize 函數
+    low_vwap_weighted = (df['low'] * 0.721001) + (df['vwap'] * (1 - 0.721001))
+    delta_weighted = delta(low_vwap_weighted, 3)
+    decay_delta = decay_linear(delta_weighted, 7)
+    rank_decay1 = rank(decay_delta)
+    
+    adv60 = df['volume'].rolling(60).mean()
+    ts_rank_low = ts_rank(df['low'], 8)
+    ts_rank_adv60 = ts_rank(adv60, 20)
+    corr_ts_rank = correlation(ts_rank_low, ts_rank_adv60, 9)
+    ts_rank_corr = ts_rank(corr_ts_rank, 7)
+    decay_ts_rank = decay_linear(ts_rank_corr, 7)
+    ts_rank_decay2 = ts_rank(decay_ts_rank, 4)
+    
+    return np.maximum(rank_decay1, ts_rank_decay2)
+
+def alpha_098(df):
+    """(rank(decay_linear(correlation(vwap, sum(adv5, 26.4715), 4.58418), 7.18088)) - rank(decay_linear(Ts_Rank(Ts_Rank(min(correlation(rank(open), rank(adv15), 20.0457), correlation(rank(high), rank(adv15), 20.0457)), 6.91477), 13.5723), 8.14799)))"""
+    adv5 = df['volume'].rolling(5).mean()
+    sum_adv5 = ts_sum(adv5, 26)
+    corr_vwap_sum = correlation(df['vwap'], sum_adv5, 5)
+    decay_corr = decay_linear(corr_vwap_sum, 7)
+    rank_decay1 = rank(decay_corr)
+    
+    adv15 = df['volume'].rolling(15).mean()
+    corr_rank_open_adv15 = correlation(rank(df['open']), rank(adv15), 20)
+    corr_rank_high_adv15 = correlation(rank(df['high']), rank(adv15), 20)
+    min_corr = np.minimum(corr_rank_open_adv15, corr_rank_high_adv15)
+    ts_rank_min = ts_rank(min_corr, 7)
+    ts_rank_ts_rank = ts_rank(ts_rank_min, 14)
+    decay_ts_rank = decay_linear(ts_rank_ts_rank, 8)
+    rank_decay2 = rank(decay_ts_rank)
+    
+    return rank_decay1 - rank_decay2
+
+def alpha_099(df):
+    """((rank(correlation(sum(((close * 0.60833) + (open * (1 - 0.60833))), 9.06103), sum(adv60, 9.06103), 6.37221)) < rank(correlation(Ts_Rank(((high + low) / 2), 12.4667), Ts_Rank(volume, 11.1287), 6.45321)))"""
+    close_open_weighted = (df['close'] * 0.60833) + (df['open'] * (1 - 0.60833))
+    sum_weighted = ts_sum(close_open_weighted, 9)
+    adv60 = df['volume'].rolling(60).mean()
+    sum_adv60 = ts_sum(adv60, 9)
+    corr_sum_weighted_adv60 = correlation(sum_weighted, sum_adv60, 6)
+    rank_corr1 = rank(corr_sum_weighted_adv60)
+    
+    high_low_avg = (df['high'] + df['low']) / 2
+    ts_rank_hl = ts_rank(high_low_avg, 12)
+    ts_rank_volume = ts_rank(df['volume'], 11)
+    corr_ts_rank = correlation(ts_rank_hl, ts_rank_volume, 6)
+    rank_corr2 = rank(corr_ts_rank)
+    
+    return rank_corr1 < rank_corr2
+
+def alpha_100(df):
+    """(0 - (1 * (((1.5 * scale(indneutralize(indneutralize(rank(((((close - low) - (high - close)) / (high - low)) * volume)), IndClass.subindustry), IndClass.subindustry))) - scale(indneutralize((correlation(close, rank(adv20), 5) - ((high + low) / 2)), IndClass.subindustry))) * (volume / adv20))))"""
+    # 簡化實現，移除 IndNeutralize 函數
+    numerator = (df['close'] - df['low']) - (df['high'] - df['close'])
+    denominator = df['high'] - df['low']
+    ratio = numerator / denominator
+    volume_ratio = ratio * df['volume']
+    rank_volume_ratio = rank(volume_ratio)
+    scale_rank = scale(rank_volume_ratio, 1.5)
+    
+    adv20 = df['volume'].rolling(20).mean()
+    corr_close_rank_adv20 = correlation(df['close'], rank(adv20), 5)
+    high_low_avg = (df['high'] + df['low']) / 2
+    diff_corr_avg = corr_close_rank_adv20 - high_low_avg
+    scale_diff = scale(diff_corr_avg)
+    
+    volume_adv20_ratio = df['volume'] / adv20
+    
+    return 0 - (1 * ((scale_rank - scale_diff) * volume_adv20_ratio))
+
+def alpha_101(df):
+    """((close - open) / delay(close, 1))"""
+    delay_close_1 = delay(df['close'], 1)
+    return (df['close'] - df['open']) / delay_close_1
+
+# 完整的101個因子實現完成
+
+# 因子字典（完整101個）
 alpha_funcs = {
     'alpha_001': alpha_001,
     'alpha_002': alpha_002,
@@ -1021,11 +1350,32 @@ alpha_funcs = {
     'alpha_078': alpha_078,
     'alpha_079': alpha_079,
     'alpha_080': alpha_080,
+    'alpha_081': alpha_081,
+    'alpha_082': alpha_082,
+    'alpha_083': alpha_083,
+    'alpha_084': alpha_084,
+    'alpha_085': alpha_085,
+    'alpha_086': alpha_086,
+    'alpha_087': alpha_087,
+    'alpha_088': alpha_088,
+    'alpha_089': alpha_089,
+    'alpha_090': alpha_090,
+    'alpha_091': alpha_091,
+    'alpha_092': alpha_092,
+    'alpha_093': alpha_093,
+    'alpha_094': alpha_094,
+    'alpha_095': alpha_095,
+    'alpha_096': alpha_096,
+    'alpha_097': alpha_097,
+    'alpha_098': alpha_098,
+    'alpha_099': alpha_099,
+    'alpha_100': alpha_100,
+    'alpha_101': alpha_101,
 }
 
 def calc_alpha101_factors(df, vwap_window=10):
     """
-    計算 Alpha101 因子（前80個示例）
+    計算 Alpha101 因子（完整101個）
     傳回含所有 alpha_xxx 欄位的 DataFrame
     
     參數:
@@ -1094,5 +1444,7 @@ if __name__ == "__main__":
     print("因子欄位:", list(alpha_funcs.keys()))
     print("\n前幾行結果:")
     print(result.head())
+
+
 
 
