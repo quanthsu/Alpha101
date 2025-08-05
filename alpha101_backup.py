@@ -82,10 +82,10 @@ def scale(series, k=1):
     return k * series / np.nansum(np.abs(series))
 
 def rank(series):
-    """舊版橫截面排名函數（已棄用）"""
-    # 注意：此函數已棄用，請使用 cross_sectional_rank(df, series) 代替
-    # 這個函數只是為了向後兼容而保留
-    raise DeprecationWarning("rank() 函數已棄用，請使用 cross_sectional_rank(df, series) 代替")
+    """橫截面排名"""
+    # 這個函數需要在全局 DataFrame 上調用，按日期分組進行橫截面排名
+    # 注意：這個函數需要在包含所有股票數據的 DataFrame 上調用
+    return series.rank(pct=True)
 
 def cross_sectional_rank(df, series_or_column):
     """橫截面排名函數"""
@@ -171,16 +171,13 @@ def calculate_adv(df, window=20):
     計算平均日成交量 (Average Daily Volume)
     
     參數:
-    df: DataFrame，需要包含 'volume' 和 'stock_id' 欄位
+    df: DataFrame，需要包含 'volume' 欄位
     window: 計算窗口，預設為 20
     
     返回:
-    Series: 按股票分組計算的平均日成交量
+    Series: 平均日成交量
     """
-    if 'stock_id' in df.columns:
-        return df.groupby('stock_id')['volume'].rolling(window).mean().reset_index(0, drop=True)
-    else:
-        return df['volume'].rolling(window).mean()
+    return df['volume'].rolling(window).mean()
 
 def add_vwap_to_df(df, window=10):
     """
@@ -550,7 +547,7 @@ def alpha_006(df):
 def alpha_007(df):
     """((adv20 < volume) ? ((-1 * ts_rank(abs(delta(close, 7)), 60)) * sign(delta(close, 7))) : (-1 * 1))"""
     # 按股票分組計算 adv20
-    adv20 = calculate_adv(df, 20)
+    adv20 = apply_ts_function_by_stock(df, 'volume', ts_mean, 20)
     condition = adv20 < df['volume']
     
     # 按股票分組計算 delta(close, 7)
@@ -673,7 +670,7 @@ def alpha_016(df):
 
 def alpha_017(df):
     """(((rank(ts_rank(close, 10))) * rank(delta(delta(close, 1), 1))) * rank(ts_rank((volume / adv20), 5)))"""
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     # 按股票分組計算 ts_rank 和 delta
     ts_rank_close = apply_ts_function_by_stock(df, 'close', ts_rank, 10)
     delta_close_1 = apply_ts_function_by_stock(df, 'close', delta, 1, period=1)
@@ -712,7 +709,7 @@ def alpha_020(df):
 
 def alpha_021(df):
     """((((sum(close, 8) / 8) + stddev(close, 8)) < (sum(close, 2) / 2)) ? (-1 * 1) : (((sum(close, 2) / 2) < ((sum(close, 8) / 8) - stddev(close, 8))) ? 1 : (((1 < (volume / adv20)) || ((volume / adv20) == 1)) ? 1 : (-1 * 1))))"""
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     # 按股票分組計算時間序列函數
     sum_close_8 = apply_ts_function_by_stock(df, 'close', ts_sum, 8) / 8
     sum_close_2 = apply_ts_function_by_stock(df, 'close', ts_sum, 2) / 2
@@ -763,7 +760,7 @@ def alpha_024(df):
 
 def alpha_025(df):
     """rank(((((-1 * returns) * adv20) * vwap) * (high - close)))"""
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     return cross_sectional_rank(df, (-1 * df['returns']) * adv20 * df['vwap'] * (df['high'] - df['close']))
 
 def alpha_026(df):
@@ -878,7 +875,7 @@ def alpha_035(df):
 
 def alpha_036(df):
     """(((2.21 * rank(correlation((close - open), delay(volume, 1), 15))) + (0.7 * rank((open - close)))) + (0.73 * rank(Ts_Rank(delay((-1 * returns), 6), 5))) + rank(abs(correlation(vwap, adv20, 6))) + (0.6 * rank((((sum(close, 20) / 20) - open) * (close - open)))))"""
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     close_open_diff = df['close'] - df['open']
     # 按股票分組計算 delay
     volume_delay_1 = apply_ts_function_by_stock(df, 'volume', delay, 1, d=1)
@@ -914,9 +911,9 @@ def alpha_038(df):
 
 def alpha_039(df):
     """((-1 * rank((delta(close, 7) * (1 - rank(decay_linear((volume / adv20), 9)))))) * (1 + rank(sum(returns, 250))))"""
-    adv20 = calculate_adv(df, 20)
-    delta_close_7 = apply_ts_function_by_stock(df, 'close', delta, 7, period=7)
-    decay_volume_adv20 = apply_ts_function_by_stock(df, df['volume'] / adv20, decay_linear, 9)
+    adv20 = df['volume'].rolling(20).mean()
+    delta_close_7 = delta(df['close'], 7)
+    decay_volume_adv20 = decay_linear(df['volume'] / adv20, 9)
     sum_returns_250 = apply_ts_function_by_stock(df, 'returns', ts_sum, 250)
     
     return -1 * cross_sectional_rank(df, delta_close_7 * (1 - cross_sectional_rank(df, decay_volume_adv20))) * (1 + cross_sectional_rank(df, sum_returns_250))
@@ -942,9 +939,9 @@ def alpha_042(df):
 
 def alpha_043(df):
     """(ts_rank((volume / adv20), 4) * ts_rank((-1 * delta(close, 7)), 4))"""
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     volume_adv20_ratio = df['volume'] / adv20
-    delta_close_7 = apply_ts_function_by_stock(df, 'close', delta, 7, period=7)
+    delta_close_7 = delta(df['close'], 7)
     
     return apply_ts_function_by_stock(df, volume_adv20_ratio, ts_rank, 4) * apply_ts_function_by_stock(df, -1 * delta_close_7, ts_rank, 4)
 
@@ -988,7 +985,7 @@ def alpha_046(df):
 
 def alpha_047(df):
     """(((rank((1 / close)) * volume) / adv20) * ((high * rank((high - close))) / (sum(high, 5) / 5)))"""
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     sum_high_5 = apply_ts_function_by_stock(df, 'high', ts_sum, 5) / 5
     
     term1 = (cross_sectional_rank(df, 1 / df['close']) * df['volume']) / adv20
@@ -1013,9 +1010,9 @@ def alpha_048(df):
 
 def alpha_049(df):
     """(((((delay(close, 20) - delay(close, 10)) / 10) - ((delay(close, 10) - close) / 10)) < (-1 * 0.1)) ? 1 : ((-1 * 1) * (close - delay(close, 1))))"""
-    delay_close_20 = apply_ts_function_by_stock(df, df['close'], delay, 20, d=20)
-    delay_close_10 = apply_ts_function_by_stock(df, df['close'], delay, 10, d=10)
-    delay_close_1 = apply_ts_function_by_stock(df, df['close'], delay, 1, d=1)
+    delay_close_20 = delay(df['close'], 20)
+    delay_close_10 = delay(df['close'], 10)
+    delay_close_1 = delay(df['close'], 1)
     
     term1 = (delay_close_20 - delay_close_10) / 10
     term2 = (delay_close_10 - df['close']) / 10
@@ -1030,15 +1027,14 @@ def alpha_049(df):
 
 def alpha_050(df):
     """(-1 * ts_max(rank(correlation(rank(volume), rank(vwap), 5)), 5))"""
-    corr_volume_vwap = apply_correlation_by_stock(df, cross_sectional_rank(df, df['volume']), cross_sectional_rank(df, df['vwap']), 5)
-    ts_max_result = apply_ts_function_by_stock(df, cross_sectional_rank(df, corr_volume_vwap), ts_max, 5)
-    return -1 * ts_max_result
+    corr_volume_vwap = correlation(cross_sectional_rank(df, df['volume']), cross_sectional_rank(df, df['vwap']), 5)
+    return -1 * ts_max(cross_sectional_rank(df, corr_volume_vwap), 5)
 
 def alpha_051(df):
     """(((((delay(close, 20) - delay(close, 10)) / 10) - ((delay(close, 10) - close) / 10)) < (-1 * 0.05)) ? 1 : ((-1 * 1) * (close - delay(close, 1))))"""
-    delay_close_20 = apply_ts_function_by_stock(df, df['close'], delay, 20, d=20)
-    delay_close_10 = apply_ts_function_by_stock(df, df['close'], delay, 10, d=10)
-    delay_close_1 = apply_ts_function_by_stock(df, df['close'], delay, 1, d=1)
+    delay_close_20 = delay(df['close'], 20)
+    delay_close_10 = delay(df['close'], 10)
+    delay_close_1 = delay(df['close'], 1)
     
     term1 = (delay_close_20 - delay_close_10) / 10
     term2 = (delay_close_10 - df['close']) / 10
@@ -1071,7 +1067,7 @@ def alpha_053(df):
     denominator = df['close'] - df['low']
     ratio = numerator / denominator
     
-    return -1 * apply_ts_function_by_stock(df, ratio, delta, 9, period=9)
+    return -1 * delta(ratio, 9)
 
 def alpha_054(df):
     """((-1 * ((low - close) * (open^5))) / ((low - high) * (close^5)))"""
@@ -1114,8 +1110,8 @@ def alpha_058(df):
 
 def alpha_059(df):
     """((((delay(close, 20) - delay(close, 10)) / 10) - ((delay(close, 10) - close) / 10)))"""
-    delay_close_20 = apply_ts_function_by_stock(df, df['close'], delay, 20, d=20)
-    delay_close_10 = apply_ts_function_by_stock(df, df['close'], delay, 10, d=10)
+    delay_close_20 = delay(df['close'], 20)
+    delay_close_10 = delay(df['close'], 10)
     
     term1 = (delay_close_20 - delay_close_10) / 10
     term2 = (delay_close_10 - df['close']) / 10
@@ -1129,79 +1125,79 @@ def alpha_060(df):
     ratio = numerator / denominator
     volume_ratio = ratio * df['volume']
     
-    delay_volume_2 = apply_ts_function_by_stock(df, df['volume'], delay, 2, d=2)
-    corr_ratio_volume = apply_correlation_by_stock(df, numerator, delay_volume_2, 8)
+    delay_volume_2 = delay(df['volume'], 2)
+    corr_ratio_volume = correlation(numerator, delay_volume_2, 8)
     
-    return 0 - (1 * (2 * cross_sectional_rank(df, volume_ratio) - cross_sectional_rank(df, corr_ratio_volume)))
+    return 0 - (1 * (2 * rank(volume_ratio) - rank(corr_ratio_volume)))
 
 def alpha_061(df):
     """(rank((vwap - ts_min(vwap, 16.1219))) < rank(correlation(vwap, adv20, 18.9282)))"""
     # 按股票分組計算 ts_min
     ts_min_vwap = apply_ts_function_by_stock(df, 'vwap', ts_min, 16)
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     corr_vwap_adv20 = apply_correlation_by_stock(df, 'vwap', adv20, 19)
     
-    return cross_sectional_rank(df, df['vwap'] - ts_min_vwap) < cross_sectional_rank(df, corr_vwap_adv20)
+    return rank(df['vwap'] - ts_min_vwap) < rank(corr_vwap_adv20)
 
 def alpha_062(df):
     """((rank(correlation(vwap, sum(adv20, 14.4714), 6.4714)) + rank((open - delay(high, 1)))))"""
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     sum_adv20 = apply_ts_function_by_stock(df, adv20, ts_sum, 14)
     corr_vwap_sum_adv20 = apply_correlation_by_stock(df, 'vwap', sum_adv20, 6)
-    delay_high_1 = apply_ts_function_by_stock(df, df['high'], delay, 1, d=1)
+    delay_high_1 = delay(df['high'], 1)
     
-    return cross_sectional_rank(df, corr_vwap_sum_adv20) + cross_sectional_rank(df, df['open'] - delay_high_1)
+    return rank(corr_vwap_sum_adv20) + rank(df['open'] - delay_high_1)
 
 def alpha_063(df):
     """((rank(decay_linear(delta(IndNeutralize(close, IndClass.sector), 2.72412), 6.95999)) + rank(correlation(adv20, delay(close, 4.6095), 6.95999)))"""
     # 簡化實現，移除 IndNeutralize 函數
-    delta_close = apply_ts_function_by_stock(df, 'close', delta, 3, period=3)
-    decay_delta = apply_ts_function_by_stock(df, delta_close, decay_linear, 7)
-    adv20 = calculate_adv(df, 20)
-    delay_close_5 = apply_ts_function_by_stock(df, df['close'], delay, 5, d=5)
-    corr_adv20_delay_close = apply_correlation_by_stock(df, adv20, delay_close_5, 7)
+    delta_close = delta(df['close'], 3)
+    decay_delta = decay_linear(delta_close, 7)
+    adv20 = df['volume'].rolling(20).mean()
+    delay_close_5 = delay(df['close'], 5)
+    corr_adv20_delay_close = correlation(adv20, delay_close_5, 7)
     
-    return cross_sectional_rank(df, decay_delta) + cross_sectional_rank(df, corr_adv20_delay_close)
+    return rank(decay_delta) + rank(corr_adv20_delay_close)
 
 def alpha_064(df):
     """((rank(correlation(sum(((open * 0.178404) + (low * (1 - 0.178404))), 12.7052), sum(adv20, 12.7052), 16.6208)) < rank(delta(((close * 0.955724) + (open * (1 - 0.955724))), 2.8584))) * -1)"""
     weighted_price = (df['open'] * 0.178404) + (df['low'] * (1 - 0.178404))
     sum_weighted_price = apply_ts_function_by_stock(df, weighted_price, ts_sum, 13)
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     sum_adv20 = apply_ts_function_by_stock(df, adv20, ts_sum, 13)
-    corr_sum_price_adv20 = apply_correlation_by_stock(df, sum_weighted_price, sum_adv20, 17)
+    corr_sum_price_adv20 = correlation(sum_weighted_price, sum_adv20, 17)
     
     close_open_weighted = (df['close'] * 0.955724) + (df['open'] * (1 - 0.955724))
-    delta_close_open = apply_ts_function_by_stock(df, close_open_weighted, delta, 3, period=3)
+    delta_close_open = delta(close_open_weighted, 3)
     
-    return (cross_sectional_rank(df, corr_sum_price_adv20) < cross_sectional_rank(df, delta_close_open)) * -1
+    return (rank(corr_sum_price_adv20) < rank(delta_close_open)) * -1
 
 def alpha_065(df):
     """(rank(correlation(((open * 0.00817205) + (vwap * (1 - 0.00817205))), sum(adv20, 6.6911), 6.6911)) < rank((open - delay(high, 1)))))"""
     weighted_open_vwap = (df['open'] * 0.00817205) + (df['vwap'] * (1 - 0.00817205))
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     sum_adv20 = apply_ts_function_by_stock(df, adv20, ts_sum, 7)
-    corr_weighted_sum = apply_correlation_by_stock(df, weighted_open_vwap, sum_adv20, 7)
+    corr_weighted_sum = correlation(weighted_open_vwap, sum_adv20, 7)
     
-    delay_high_1 = apply_ts_function_by_stock(df, df['high'], delay, 1, d=1)
+    delay_high_1 = delay(df['high'], 1)
     open_delay_high = df['open'] - delay_high_1
     
-    return cross_sectional_rank(df, corr_weighted_sum) < cross_sectional_rank(df, open_delay_high)
+    return rank(corr_weighted_sum) < rank(open_delay_high)
 
 def alpha_066(df):
     """((rank(decay_linear(delta(vwap, 3.51013), 7.23052)) + Ts_Rank(decay_linear(((((low * 0.96633) + (low * (1 - 0.96633))) - vwap) / (open - ((high + low) / 2))), 11.4157), 6.72611)) * -1)"""
-    delta_vwap = apply_ts_function_by_stock(df, 'vwap', delta, 4, period=4)
-    decay_delta_vwap = apply_ts_function_by_stock(df, delta_vwap, decay_linear, 7)
+    delta_vwap = delta(df['vwap'], 4)
+    decay_delta_vwap = decay_linear(delta_vwap, 7)
     
     low_weighted = (df['low'] * 0.96633) + (df['low'] * (1 - 0.96633))
     high_low_avg = (df['high'] + df['low']) / 2
     numerator = low_weighted - df['vwap']
     denominator = df['open'] - high_low_avg
     ratio = numerator / denominator
-    decay_ratio = apply_ts_function_by_stock(df, ratio, decay_linear, 11)
+    decay_ratio = decay_linear(ratio, 11)
     ts_rank_decay = apply_ts_function_by_stock(df, decay_ratio, ts_rank, 7)
     
-    return (cross_sectional_rank(df, decay_delta_vwap) + ts_rank_decay) * -1
+    return (rank(decay_delta_vwap) + ts_rank_decay) * -1
 
 def alpha_067(df):
     """((rank((high - ts_min(high, 2.72412)))^rank(correlation(IndNeutralize(vwap, IndClass.sector), IndNeutralize(adv20, IndClass.sector), 6.4714)))"""
@@ -1209,44 +1205,44 @@ def alpha_067(df):
     # 按股票分組計算 ts_min
     ts_min_high = apply_ts_function_by_stock(df, 'high', ts_min, 3)
     high_min_diff = df['high'] - ts_min_high
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     corr_vwap_adv20 = apply_correlation_by_stock(df, 'vwap', adv20, 6)
     
-    return cross_sectional_rank(df, high_min_diff) ** cross_sectional_rank(df, corr_vwap_adv20)
+    return rank(high_min_diff) ** rank(corr_vwap_adv20)
 
 def alpha_068(df):
     """((Ts_Rank(correlation(rank(high), rank(adv15), 8.91644), 13.9333) < rank(delta(((close * 0.518371) + (low * (1 - 0.518371))), 1.06157))) * -1)"""
-    adv15 = calculate_adv(df, 15)
-    corr_rank_high_adv15 = apply_correlation_by_stock(df, cross_sectional_rank(df, df['high']), cross_sectional_rank(df, adv15), 9)
+    adv15 = df['volume'].rolling(15).mean()
+    corr_rank_high_adv15 = correlation(rank(df['high']), rank(adv15), 9)
     ts_rank_corr = apply_ts_function_by_stock(df, corr_rank_high_adv15, ts_rank, 14)
     
     close_low_weighted = (df['close'] * 0.518371) + (df['low'] * (1 - 0.518371))
-    delta_weighted = apply_ts_function_by_stock(df, close_low_weighted, delta, 1, period=1)
+    delta_weighted = delta(close_low_weighted, 1)
     
-    return (ts_rank_corr < cross_sectional_rank(df, delta_weighted)) * -1
+    return (ts_rank_corr < rank(delta_weighted)) * -1
 
 def alpha_069(df):
     """((rank(ts_max(delta(IndNeutralize(vwap, IndClass.industry), 2.72412), 4.79344))^rank(correlation(IndNeutralize(close, IndClass.industry), IndNeutralize(adv20, IndClass.industry), 4.79344)))"""
     # 簡化實現，移除 IndNeutralize 函數
-    delta_vwap = apply_ts_function_by_stock(df, 'vwap', delta, 3, period=3)
+    delta_vwap = delta(df['vwap'], 3)
     ts_max_delta = apply_ts_function_by_stock(df, delta_vwap, ts_max, 5)
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     corr_close_adv20 = apply_correlation_by_stock(df, 'close', adv20, 5)
     
-    return cross_sectional_rank(df, ts_max_delta) ** cross_sectional_rank(df, corr_close_adv20)
+    return rank(ts_max_delta) ** rank(corr_close_adv20)
 
 def alpha_070(df):
     """((rank(delta(vwap, 1.29456))^rank(correlation(IndNeutralize(close, IndClass.industry), adv50, 17.8256)))"""
     # 簡化實現，移除 IndNeutralize 函數
-    delta_vwap = apply_ts_function_by_stock(df, 'vwap', delta, 1, period=1)
-    adv50 = calculate_adv(df, 50)
+    delta_vwap = delta(df['vwap'], 1)
+    adv50 = df['volume'].rolling(50).mean()
     corr_close_adv50 = apply_correlation_by_stock(df, 'close', adv50, 18)
     
-    return cross_sectional_rank(df, delta_vwap) ** cross_sectional_rank(df, corr_close_adv50)
+    return rank(delta_vwap) ** rank(corr_close_adv50)
 
 def alpha_071(df):
     """max(Ts_Rank(decay_linear(correlation(Ts_Rank(close, 3.70376), Ts_Rank(adv15, 15.7152), 4.86682), 7.95524), 3.65999), Ts_Rank(decay_linear(Ts_Rank(correlation(rank(low), rank(adv15), 8.62541), 8.40009), 13.6813)))"""
-    adv15 = calculate_adv(df, 15)
+    adv15 = df['volume'].rolling(15).mean()
     
     # 第一部分
     # 按股票分組計算 ts_rank
@@ -1267,7 +1263,7 @@ def alpha_071(df):
 def alpha_072(df):
     """(rank(decay_linear(correlation(((high + low) / 2), adv20, 8.93345), 10.1519)) / rank(decay_linear(correlation(Ts_Rank(vwap, 3.72465), Ts_Rank(volume, 18.5188), 6.86671), 2.95011)))"""
     high_low_avg = (df['high'] + df['low']) / 2
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     # 按股票分組計算所有函數
     corr_hl_adv20 = apply_correlation_by_stock(df, high_low_avg, adv20, 9)
     decay_corr_hl = apply_ts_function_by_stock(df, corr_hl_adv20, decay_linear, 10)
@@ -1277,53 +1273,53 @@ def alpha_072(df):
     corr_ts_rank = apply_correlation_by_stock(df, ts_rank_vwap, ts_rank_volume, 7)
     decay_corr_ts = apply_ts_function_by_stock(df, corr_ts_rank, decay_linear, 3)
     
-    return cross_sectional_rank(df, decay_corr_hl) / cross_sectional_rank(df, decay_corr_ts)
+    return rank(decay_corr_hl) / rank(decay_corr_ts)
 
 def alpha_073(df):
     """(max(rank(decay_linear(delta(vwap, 4.72797), 2.22164)), Ts_Rank(decay_linear(delta(((adv20 * 0.369701) + (vwap * (1 - 0.369701))), 3.08213), 3.22299), 9.08988)) * -1)"""
-    delta_vwap = apply_ts_function_by_stock(df, 'vwap', delta, 5, period=5)
-    decay_delta_vwap = apply_ts_function_by_stock(df, delta_vwap, decay_linear, 2)
-    rank_decay1 = cross_sectional_rank(df, decay_delta_vwap)
+    delta_vwap = delta(df['vwap'], 5)
+    decay_delta_vwap = decay_linear(delta_vwap, 2)
+    rank_decay1 = rank(decay_delta_vwap)
     
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     weighted_adv20_vwap = (adv20 * 0.369701) + (df['vwap'] * (1 - 0.369701))
-    delta_weighted = apply_ts_function_by_stock(df, weighted_adv20_vwap, delta, 3, period=3)
-    decay_delta_weighted = apply_ts_function_by_stock(df, delta_weighted, decay_linear, 3)
+    delta_weighted = delta(weighted_adv20_vwap, 3)
+    decay_delta_weighted = decay_linear(delta_weighted, 3)
     ts_rank_decay2 = apply_ts_function_by_stock(df, decay_delta_weighted, ts_rank, 9)
     
     return np.maximum(rank_decay1, ts_rank_decay2) * -1
 
 def alpha_074(df):
     """((rank(correlation(close, sum(adv20, 37.0616), 15.1102)) < rank(correlation(rank(((high + low) / 2)), rank(volume), 11.2328))) * -1)"""
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     sum_adv20 = apply_ts_function_by_stock(df, adv20, ts_sum, 37)
     corr_close_sum_adv20 = apply_correlation_by_stock(df, 'close', sum_adv20, 15)
     
     high_low_avg = (df['high'] + df['low']) / 2
     corr_rank_hl_volume = apply_correlation_by_stock(df, cross_sectional_rank(df, high_low_avg), cross_sectional_rank(df, df['volume']), 11)
     
-    return (cross_sectional_rank(df, corr_close_sum_adv20) < cross_sectional_rank(df, corr_rank_hl_volume)) * -1
+    return (rank(corr_close_sum_adv20) < rank(corr_rank_hl_volume)) * -1
 
 def alpha_075(df):
     """(rank(correlation(vwap, volume, 4.24304)) < rank(correlation(rank(low), rank(adv50), 4.14243)))"""
-    corr_vwap_volume = apply_correlation_by_stock(df, df['vwap'], df['volume'], 4)
-    adv50 = calculate_adv(df, 50)
-    corr_rank_low_adv50 = apply_correlation_by_stock(df, cross_sectional_rank(df, df['low']), cross_sectional_rank(df, adv50), 4)
+    corr_vwap_volume = correlation(df['vwap'], df['volume'], 4)
+    adv50 = df['volume'].rolling(50).mean()
+    corr_rank_low_adv50 = correlation(rank(df['low']), rank(adv50), 4)
     
-    return cross_sectional_rank(df, corr_vwap_volume) < cross_sectional_rank(df, corr_rank_low_adv50)
+    return rank(corr_vwap_volume) < rank(corr_rank_low_adv50)
 
 def alpha_076(df):
     """(max(rank(decay_linear(delta(vwap, 1.24383), 11.8259)), rank(decay_linear(Ts_Rank(correlation(IndNeutralize(low, IndClass.sector), adv81, 8.47141), 6.94124), 13.2504)))"""
     # 簡化實現，移除 IndNeutralize 函數
     delta_vwap = delta(df['vwap'], 1)
-    decay_delta_vwap = apply_ts_function_by_stock(df, delta_vwap, decay_linear, 12)
-    rank_decay1 = cross_sectional_rank(df, decay_delta_vwap)
+    decay_delta_vwap = decay_linear(delta_vwap, 12)
+    rank_decay1 = rank(decay_delta_vwap)
     
-    adv81 = calculate_adv(df, 81)
-    corr_low_adv81 = apply_correlation_by_stock(df, df['low'], adv81, 8)
+    adv81 = df['volume'].rolling(81).mean()
+    corr_low_adv81 = correlation(df['low'], adv81, 8)
     ts_rank_corr = apply_ts_function_by_stock(df, corr_low_adv81, ts_rank, 7)
-    decay_ts_rank = apply_ts_function_by_stock(df, ts_rank_corr, decay_linear, 13)
-    rank_decay2 = cross_sectional_rank(df, decay_ts_rank)
+    decay_ts_rank = decay_linear(ts_rank_corr, 13)
+    rank_decay2 = rank(decay_ts_rank)
     
     return np.maximum(rank_decay1, rank_decay2)
 
@@ -1331,13 +1327,13 @@ def alpha_077(df):
     """min(rank(decay_linear(((((high + low) / 2) + high) - (vwap + high)), 9.04588)), rank(decay_linear(correlation(((low + high) / 2), adv40, 9.47008), 9.47008)))"""
     high_low_avg = (df['high'] + df['low']) / 2
     term1 = ((high_low_avg + df['high']) - (df['vwap'] + df['high']))
-    decay_term1 = apply_ts_function_by_stock(df, term1, decay_linear, 9)
-    rank_decay1 = cross_sectional_rank(df, decay_term1)
+    decay_term1 = decay_linear(term1, 9)
+    rank_decay1 = rank(decay_term1)
     
-    adv40 = calculate_adv(df, 40)
-    corr_hl_adv40 = apply_correlation_by_stock(df, high_low_avg, adv40, 9)
-    decay_corr = apply_ts_function_by_stock(df, corr_hl_adv40, decay_linear, 9)
-    rank_decay2 = cross_sectional_rank(df, decay_corr)
+    adv40 = df['volume'].rolling(40).mean()
+    corr_hl_adv40 = correlation(high_low_avg, adv40, 9)
+    decay_corr = decay_linear(corr_hl_adv40, 9)
+    rank_decay2 = rank(decay_corr)
     
     return np.minimum(rank_decay1, rank_decay2)
 
@@ -1345,13 +1341,13 @@ def alpha_078(df):
     """(rank(correlation(sum(((low * 0.352233) + (vwap * (1 - 0.352233))), 19.7428), sum(adv40, 19.7428), 6.83313))^rank(correlation(rank(vwap), rank(volume), 5.77452)))"""
     low_vwap_weighted = (df['low'] * 0.352233) + (df['vwap'] * (1 - 0.352233))
     sum_weighted = apply_ts_function_by_stock(df, low_vwap_weighted, ts_sum, 20)
-    adv40 = calculate_adv(df, 40)
+    adv40 = df['volume'].rolling(40).mean()
     sum_adv40 = apply_ts_function_by_stock(df, adv40, ts_sum, 20)
-    corr_sum_weighted_adv40 = apply_correlation_by_stock(df, sum_weighted, sum_adv40, 7)
+    corr_sum_weighted_adv40 = correlation(sum_weighted, sum_adv40, 7)
     
-    corr_rank_vwap_volume = apply_correlation_by_stock(df, cross_sectional_rank(df, df['vwap']), cross_sectional_rank(df, df['volume']), 6)
+    corr_rank_vwap_volume = correlation(rank(df['vwap']), rank(df['volume']), 6)
     
-    return cross_sectional_rank(df, corr_sum_weighted_adv40) ** cross_sectional_rank(df, corr_rank_vwap_volume)
+    return rank(corr_sum_weighted_adv40) ** rank(corr_rank_vwap_volume)
 
 def alpha_079(df):
     """(rank(delta(IndNeutralize(((close * 0.60733) + (open * (1 - 0.60733))), IndClass.sector), 1.23438)) < rank(correlation(Ts_Rank(vwap, 3.60973), Ts_Rank(adv150, 9.18637), 14.6644)))"""
@@ -1360,12 +1356,12 @@ def alpha_079(df):
     # 按股票分組計算所有時間序列函數
     delta_weighted = apply_ts_function_by_stock(df, close_open_weighted, delta, 1, period=1)
     
-    adv150 = calculate_adv(df, 150)
+    adv150 = df['volume'].rolling(150).mean()
     ts_rank_vwap = apply_ts_function_by_stock(df, 'vwap', ts_rank, 4)
     ts_rank_adv150 = apply_ts_function_by_stock(df, adv150, ts_rank, 9)
     corr_ts_rank = apply_correlation_by_stock(df, ts_rank_vwap, ts_rank_adv150, 15)
     
-    return cross_sectional_rank(df, delta_weighted) < cross_sectional_rank(df, corr_ts_rank)
+    return rank(delta_weighted) < rank(corr_ts_rank)
 
 def alpha_080(df):
     """((rank(Sign(delta(IndNeutralize(((open * 0.868128) + (high * (1 - 0.868128))), IndClass.industry), 4.04545)))^rank(correlation(high, adv10, 5.11456)))"""
@@ -1374,36 +1370,36 @@ def alpha_080(df):
     delta_weighted = delta(open_high_weighted, 4)
     sign_delta = np.sign(delta_weighted)
     
-    adv10 = calculate_adv(df, 10)
-    corr_high_adv10 = apply_correlation_by_stock(df, df['high'], adv10, 5)
+    adv10 = df['volume'].rolling(10).mean()
+    corr_high_adv10 = correlation(df['high'], adv10, 5)
     
-    return cross_sectional_rank(df, sign_delta) ** cross_sectional_rank(df, corr_high_adv10)
+    return rank(sign_delta) ** rank(corr_high_adv10)
 
 def alpha_081(df):
     """((rank(Log(product(((close - open), (close - open)), 14.5864))) < rank(correlation(IndNeutralize(adv20, IndClass.industry), IndNeutralize(adv60, IndClass.industry), 8.4611)))"""
     # 簡化實現，移除 IndNeutralize 函數
     close_open_diff = df['close'] - df['open']
-    product_diff = apply_ts_function_by_stock(df, close_open_diff, product, 15)
+    product_diff = product(close_open_diff, 15)
     log_product = np.log(product_diff)
-    rank_log = cross_sectional_rank(df, log_product)
+    rank_log = rank(log_product)
     
-    adv20 = calculate_adv(df, 20)
-    adv60 = calculate_adv(df, 60)
-    corr_adv20_adv60 = apply_correlation_by_stock(df, adv20, adv60, 8)
-    rank_corr = cross_sectional_rank(df, corr_adv20_adv60)
+    adv20 = df['volume'].rolling(20).mean()
+    adv60 = df['volume'].rolling(60).mean()
+    corr_adv20_adv60 = correlation(adv20, adv60, 8)
+    rank_corr = rank(corr_adv20_adv60)
     
     return rank_log < rank_corr
 
 def alpha_082(df):
     """(min(rank(decay_linear(delta(open, 1.46063), 14.8717)), Ts_Rank(decay_linear(correlation(IndNeutralize(volume, IndClass.sector), ((open * 0.634196) + (open * (1 - 0.634196))), 17.4842), 6.92131), 13.4283))"""
     # 簡化實現，移除 IndNeutralize 函數
-    delta_open = apply_ts_function_by_stock(df, 'open', delta, 1, period=1)
-    decay_delta = apply_ts_function_by_stock(df, delta_open, decay_linear, 15)
-    rank_decay1 = cross_sectional_rank(df, decay_delta)
+    delta_open = delta(df['open'], 1)
+    decay_delta = decay_linear(delta_open, 15)
+    rank_decay1 = rank(decay_delta)
     
     open_weighted = (df['open'] * 0.634196) + (df['open'] * (1 - 0.634196))
-    corr_volume_open = apply_correlation_by_stock(df, df['volume'], open_weighted, 17)
-    decay_corr = apply_ts_function_by_stock(df, corr_volume_open, decay_linear, 7)
+    corr_volume_open = correlation(df['volume'], open_weighted, 17)
+    decay_corr = decay_linear(corr_volume_open, 7)
     ts_rank_decay = apply_ts_function_by_stock(df, decay_corr, ts_rank, 13)
     
     return np.minimum(rank_decay1, ts_rank_decay)
@@ -1416,8 +1412,8 @@ def alpha_083(df):
     ratio = high_low_diff / sum_close_5
     # 按股票分組計算 delay
     delay_ratio = apply_ts_function_by_stock(df, ratio, delay, 2, d=2)
-    rank_delay = cross_sectional_rank(df, delay_ratio)
-    rank_volume = cross_sectional_rank(df, cross_sectional_rank(df, df['volume']))
+    rank_delay = rank(delay_ratio)
+    rank_volume = rank(rank(df['volume']))
     
     numerator = rank_delay * rank_volume
     denominator = ratio / (df['vwap'] - df['close'])
@@ -1438,7 +1434,7 @@ def alpha_084(df):
 def alpha_085(df):
     """(rank(correlation(((high * 0.876703) + (close * (1 - 0.876703))), adv30, 9.61331))^rank(correlation(Ts_Rank(((high + low) / 2), 3.70596), Ts_Rank(volume, 10.1595), 7.11408)))"""
     high_close_weighted = (df['high'] * 0.876703) + (df['close'] * (1 - 0.876703))
-    adv30 = calculate_adv(df, 30)
+    adv30 = df['volume'].rolling(30).mean()
     # 按股票分組計算所有函數
     corr_weighted_adv30 = apply_correlation_by_stock(df, high_close_weighted, adv30, 10)
     
@@ -1447,19 +1443,19 @@ def alpha_085(df):
     ts_rank_volume = apply_ts_function_by_stock(df, 'volume', ts_rank, 10)
     corr_ts_rank = apply_correlation_by_stock(df, ts_rank_hl, ts_rank_volume, 7)
     
-    return cross_sectional_rank(df, corr_weighted_adv30) ** cross_sectional_rank(df, corr_ts_rank)
+    return rank(corr_weighted_adv30) ** rank(corr_ts_rank)
 
 def alpha_086(df):
     """(Ts_Rank(correlation(close, sum(adv20, 14.7444), 6.00049), 20.4195) < rank(((open + close) - (vwap + open))))"""
-    adv20 = calculate_adv(df, 20)
+    adv20 = df['volume'].rolling(20).mean()
     sum_adv20 = apply_ts_function_by_stock(df, adv20, ts_sum, 15)
-    corr_close_sum = apply_correlation_by_stock(df, df['close'], sum_adv20, 6)
+    corr_close_sum = correlation(df['close'], sum_adv20, 6)
     ts_rank_corr = apply_ts_function_by_stock(df, corr_close_sum, ts_rank, 20)
     
     open_close_sum = df['open'] + df['close']
     vwap_open_sum = df['vwap'] + df['open']
     diff = open_close_sum - vwap_open_sum
-    rank_diff = cross_sectional_rank(df, diff)
+    rank_diff = rank(diff)
     
     return ts_rank_corr < rank_diff
 
@@ -1468,31 +1464,31 @@ def alpha_087(df):
     # 簡化實現，移除 IndNeutralize 函數
     close_vwap_weighted = (df['close'] * 0.369701) + (df['vwap'] * (1 - 0.369701))
     delta_weighted = delta(close_vwap_weighted, 3)
-    decay_delta = apply_ts_function_by_stock(df, delta_weighted, decay_linear, 3)
-    rank_decay1 = cross_sectional_rank(df, decay_delta)
+    decay_delta = decay_linear(delta_weighted, 3)
+    rank_decay1 = rank(decay_delta)
     
-    adv81 = calculate_adv(df, 81)
-    corr_adv81_close = apply_correlation_by_stock(df, adv81, df['close'], 13)
+    adv81 = df['volume'].rolling(81).mean()
+    corr_adv81_close = correlation(adv81, df['close'], 13)
     abs_corr = abs(corr_adv81_close)
-    decay_abs = apply_ts_function_by_stock(df, abs_corr, decay_linear, 4)
+    decay_abs = decay_linear(abs_corr, 4)
     ts_rank_decay = apply_ts_function_by_stock(df, decay_abs, ts_rank, 7)
     
     return np.maximum(rank_decay1, ts_rank_decay)
 
 def alpha_088(df):
     """(rank(decay_linear(((rank(open, 6.47141) + rank(open, 14.4714)) - (rank(delay(close, 1), 6.47141) + rank(delay(close, 1), 14.4714))), 8.83606)))"""
-    rank_open_6 = cross_sectional_rank(df, df['open'])
-    rank_open_14 = cross_sectional_rank(df, df['open'])
-    delay_close_1 = apply_ts_function_by_stock(df, df['close'], delay, 1, d=1)
-    rank_delay_close_6 = cross_sectional_rank(df, delay_close_1)
-    rank_delay_close_14 = cross_sectional_rank(df, delay_close_1)
+    rank_open_6 = rank(df['open'])
+    rank_open_14 = rank(df['open'])
+    delay_close_1 = delay(df['close'], 1)
+    rank_delay_close_6 = rank(delay_close_1)
+    rank_delay_close_14 = rank(delay_close_1)
     
     term1 = rank_open_6 + rank_open_14
     term2 = rank_delay_close_6 + rank_delay_close_14
     diff = term1 - term2
-    decay_diff = apply_ts_function_by_stock(df, diff, decay_linear, 9)
+    decay_diff = decay_linear(diff, 9)
     
-    return cross_sectional_rank(df, decay_diff)
+    return rank(decay_diff)
 
 def alpha_089(df):
     """(2 * (rank(decay_linear(correlation(((low + open) - (vwap + close)), delay(close, 1), 6.47141), 8.83606)) - rank(decay_linear(Ts_Rank(Ts_Rank(correlation(IndNeutralize(volume, IndClass.sector), ((open + close) / 2), 6.74425), 6.21089), 5.5375), 2.02764))))"""
@@ -1500,17 +1496,17 @@ def alpha_089(df):
     low_open_sum = df['low'] + df['open']
     vwap_close_sum = df['vwap'] + df['close']
     diff1 = low_open_sum - vwap_close_sum
-    delay_close_1 = apply_ts_function_by_stock(df, df['close'], delay, 1, d=1)
-    corr_diff_delay = apply_correlation_by_stock(df, diff1, delay_close_1, 6)
-    decay_corr = apply_ts_function_by_stock(df, corr_diff_delay, decay_linear, 9)
-    rank_decay1 = cross_sectional_rank(df, decay_corr)
+    delay_close_1 = delay(df['close'], 1)
+    corr_diff_delay = correlation(diff1, delay_close_1, 6)
+    decay_corr = decay_linear(corr_diff_delay, 9)
+    rank_decay1 = rank(decay_corr)
     
     open_close_avg = (df['open'] + df['close']) / 2
-    corr_volume_avg = apply_correlation_by_stock(df, df['volume'], open_close_avg, 7)
+    corr_volume_avg = correlation(df['volume'], open_close_avg, 7)
     ts_rank_corr = apply_ts_function_by_stock(df, corr_volume_avg, ts_rank, 6)
     ts_rank_ts_rank = apply_ts_function_by_stock(df, ts_rank_corr, ts_rank, 6)
-    decay_ts_rank = apply_ts_function_by_stock(df, ts_rank_ts_rank, decay_linear, 5)
-    rank_decay2 = cross_sectional_rank(df, decay_ts_rank)
+    decay_ts_rank = decay_linear(ts_rank_ts_rank, 5)
+    rank_decay2 = rank(decay_ts_rank)
     
     return 2 * (rank_decay1 - rank_decay2)
 
@@ -1520,9 +1516,9 @@ def alpha_090(df):
     # 按股票分組計算 ts_max
     ts_max_close = apply_ts_function_by_stock(df, 'close', ts_max, 5)
     close_max_diff = df['close'] - ts_max_close
-    rank_diff = cross_sectional_rank(df, close_max_diff)
+    rank_diff = rank(close_max_diff)
     
-    adv40 = calculate_adv(df, 40)
+    adv40 = df['volume'].rolling(40).mean()
     # 按股票分組計算所有函數
     corr_adv40_low = apply_correlation_by_stock(df, adv40, 'low', 5)
     ts_rank_corr = apply_ts_function_by_stock(df, corr_adv40_low, ts_rank, 3)
@@ -1536,17 +1532,17 @@ def alpha_091(df):
     close_hl_diff = df['close'] - high_low_avg
     ts_rank_diff = apply_ts_function_by_stock(df, close_hl_diff, ts_rank, 9)
     
-    adv40 = calculate_adv(df, 40)
-    corr_adv40_close = apply_correlation_by_stock(df, adv40, df['close'], 10)
+    adv40 = df['volume'].rolling(40).mean()
+    corr_adv40_close = correlation(adv40, df['close'], 10)
     ts_rank_corr = apply_ts_function_by_stock(df, corr_adv40_close, ts_rank, 18)
     
     term1 = ts_rank_diff + ts_rank_corr
     
     max_open_5 = np.maximum(df['open'], 5)
     max_open_squared = max_open_5 ** 2
-    rank_max_open = cross_sectional_rank(df, max_open_squared)
+    rank_max_open = rank(max_open_squared)
     
-    decay_hl_avg = apply_ts_function_by_stock(df, high_low_avg, decay_linear, 19)
+    decay_hl_avg = decay_linear(high_low_avg, 19)
     ts_rank_decay = apply_ts_function_by_stock(df, decay_hl_avg, ts_rank, 7)
     
     term2 = rank_max_open + ts_rank_decay
@@ -1563,7 +1559,7 @@ def alpha_092(df):
     decay_condition = apply_ts_function_by_stock(df, condition.astype(float), decay_linear, 10)
     ts_rank_decay1 = apply_ts_function_by_stock(df, decay_condition, ts_rank, 5)
     
-    adv30 = calculate_adv(df, 30)
+    adv30 = df['volume'].rolling(30).mean()
     ts_rank_low = apply_ts_function_by_stock(df, 'low', ts_rank, 9)
     ts_rank_adv30 = apply_ts_function_by_stock(df, adv30, ts_rank, 18)
     corr_ts_rank = apply_correlation_by_stock(df, ts_rank_low, ts_rank_adv30, 6)
@@ -1576,17 +1572,17 @@ def alpha_093(df):
     """(Ts_Rank(decay_linear(correlation(IndNeutralize(volume, IndClass.subindustry), ((low * 0.721544) + (low * (1 - 0.721544))), 6.00052), 5.2467), 2.88563) - Ts_Rank(decay_linear(Ts_Rank(correlation(Ts_Rank(close, 8.62591), Ts_Rank(adv60, 17.5206), 8.43296), 8.17068), 6.02093), 4.88563))"""
     # 簡化實現，移除 IndNeutralize 函數
     low_weighted = (df['low'] * 0.721544) + (df['low'] * (1 - 0.721544))
-    corr_volume_low = apply_correlation_by_stock(df, df['volume'], low_weighted, 6)
-    decay_corr = apply_ts_function_by_stock(df, corr_volume_low, decay_linear, 5)
+    corr_volume_low = correlation(df['volume'], low_weighted, 6)
+    decay_corr = decay_linear(corr_volume_low, 5)
     ts_rank_decay1 = apply_ts_function_by_stock(df, decay_corr, ts_rank, 3)
     
-    adv60 = calculate_adv(df, 60)
+    adv60 = df['volume'].rolling(60).mean()
     # 按股票分組計算 ts_rank
     ts_rank_close = apply_ts_function_by_stock(df, 'close', ts_rank, 9)
     ts_rank_adv60 = apply_ts_function_by_stock(df, adv60, ts_rank, 18)
-    corr_ts_rank = apply_correlation_by_stock(df, ts_rank_close, ts_rank_adv60, 8)
+    corr_ts_rank = correlation(ts_rank_close, ts_rank_adv60, 8)
     ts_rank_corr = apply_ts_function_by_stock(df, corr_ts_rank, ts_rank, 8)
-    decay_ts_rank = apply_ts_function_by_stock(df, ts_rank_corr, decay_linear, 6)
+    decay_ts_rank = decay_linear(ts_rank_corr, 6)
     ts_rank_decay2 = apply_ts_function_by_stock(df, decay_ts_rank, ts_rank, 5)
     
     return ts_rank_decay1 - ts_rank_decay2
@@ -1596,9 +1592,9 @@ def alpha_094(df):
     # 按股票分組計算 ts_min
     ts_min_vwap = apply_ts_function_by_stock(df, 'vwap', ts_min, 12)
     vwap_min_diff = df['vwap'] - ts_min_vwap
-    rank_diff = cross_sectional_rank(df, vwap_min_diff)
+    rank_diff = rank(vwap_min_diff)
     
-    adv60 = calculate_adv(df, 60)
+    adv60 = df['volume'].rolling(60).mean()
     # 按股票分組計算 ts_rank
     ts_rank_vwap = apply_ts_function_by_stock(df, 'vwap', ts_rank, 20)
     # 按股票分組計算所有ts函數
@@ -1613,16 +1609,16 @@ def alpha_095(df):
     # 按股票分組計算 ts_min
     ts_min_open = apply_ts_function_by_stock(df, 'open', ts_min, 12)
     open_min_diff = df['open'] - ts_min_open
-    rank_diff = cross_sectional_rank(df, open_min_diff)
+    rank_diff = rank(open_min_diff)
     
     high_low_avg = (df['high'] + df['low']) / 2
     # 按股票分組計算 ts_sum
     sum_hl_avg = apply_ts_function_by_stock(df, high_low_avg, ts_sum, 19)
-    adv40 = calculate_adv(df, 40)
+    adv40 = df['volume'].rolling(40).mean()
     sum_adv40 = apply_ts_function_by_stock(df, adv40, ts_sum, 19)
     # 按股票分組計算所有函數
     corr_sum = apply_correlation_by_stock(df, sum_hl_avg, sum_adv40, 13)
-    rank_corr = cross_sectional_rank(df, corr_sum)
+    rank_corr = rank(corr_sum)
     rank_corr_power = rank_corr ** 5
     ts_rank_power = apply_ts_function_by_stock(df, rank_corr_power, ts_rank, 12)
     
@@ -1631,16 +1627,16 @@ def alpha_095(df):
 def alpha_096(df):
     """(max(Ts_Rank(decay_linear(correlation(rank(vwap), rank(volume), 3.83878), 4.16783), 8.38151), Ts_Rank(decay_linear(Ts_Rank(((Ts_Rank(correlation(IndNeutralize(low, IndClass.sector), adv81, 8.14941), 2.72412)^5), 13.4663), 6.78068), 4.43831))"""
     # 簡化實現，移除 IndNeutralize 函數
-    corr_rank_vwap_volume = apply_correlation_by_stock(df, cross_sectional_rank(df, df['vwap']), cross_sectional_rank(df, df['volume']), 4)
-    decay_corr = apply_ts_function_by_stock(df, corr_rank_vwap_volume, decay_linear, 4)
+    corr_rank_vwap_volume = correlation(rank(df['vwap']), rank(df['volume']), 4)
+    decay_corr = decay_linear(corr_rank_vwap_volume, 4)
     ts_rank_decay1 = apply_ts_function_by_stock(df, decay_corr, ts_rank, 8)
     
-    adv81 = calculate_adv(df, 81)
-    corr_low_adv81 = apply_correlation_by_stock(df, df['low'], adv81, 8)
+    adv81 = df['volume'].rolling(81).mean()
+    corr_low_adv81 = correlation(df['low'], adv81, 8)
     ts_rank_corr = apply_ts_function_by_stock(df, corr_low_adv81, ts_rank, 3)
     ts_rank_power = ts_rank_corr ** 5
     ts_rank_power_rank = apply_ts_function_by_stock(df, ts_rank_power, ts_rank, 13)
-    decay_ts_rank = apply_ts_function_by_stock(df, ts_rank_power_rank, decay_linear, 7)
+    decay_ts_rank = decay_linear(ts_rank_power_rank, 7)
     ts_rank_decay2 = apply_ts_function_by_stock(df, decay_ts_rank, ts_rank, 4)
     
     return np.maximum(ts_rank_decay1, ts_rank_decay2)
@@ -1652,9 +1648,9 @@ def alpha_097(df):
     # 按股票分組計算所有時間序列函數
     delta_weighted = apply_ts_function_by_stock(df, low_vwap_weighted, delta, 3, period=3)
     decay_delta = apply_ts_function_by_stock(df, delta_weighted, decay_linear, 7)
-    rank_decay1 = cross_sectional_rank(df, decay_delta)
+    rank_decay1 = rank(decay_delta)
     
-    adv60 = calculate_adv(df, 60)
+    adv60 = df['volume'].rolling(60).mean()
     ts_rank_low = apply_ts_function_by_stock(df, 'low', ts_rank, 8)
     ts_rank_adv60 = apply_ts_function_by_stock(df, adv60, ts_rank, 20)
     corr_ts_rank = apply_correlation_by_stock(df, ts_rank_low, ts_rank_adv60, 9)
@@ -1666,20 +1662,20 @@ def alpha_097(df):
 
 def alpha_098(df):
     """(rank(decay_linear(correlation(vwap, sum(adv5, 26.4715), 4.58418), 7.18088)) - rank(decay_linear(Ts_Rank(Ts_Rank(min(correlation(rank(open), rank(adv15), 20.0457), correlation(rank(high), rank(adv15), 20.0457)), 6.91477), 13.5723), 8.14799)))"""
-    adv5 = calculate_adv(df, 5)
+    adv5 = df['volume'].rolling(5).mean()
     sum_adv5 = apply_ts_function_by_stock(df, adv5, ts_sum, 26)
-    corr_vwap_sum = apply_correlation_by_stock(df, df['vwap'], sum_adv5, 5)
-    decay_corr = apply_ts_function_by_stock(df, corr_vwap_sum, decay_linear, 7)
-    rank_decay1 = cross_sectional_rank(df, decay_corr)
+    corr_vwap_sum = correlation(df['vwap'], sum_adv5, 5)
+    decay_corr = decay_linear(corr_vwap_sum, 7)
+    rank_decay1 = rank(decay_corr)
     
-    adv15 = calculate_adv(df, 15)
-    corr_rank_open_adv15 = apply_correlation_by_stock(df, cross_sectional_rank(df, df['open']), cross_sectional_rank(df, adv15), 20)
-    corr_rank_high_adv15 = apply_correlation_by_stock(df, cross_sectional_rank(df, df['high']), cross_sectional_rank(df, adv15), 20)
+    adv15 = df['volume'].rolling(15).mean()
+    corr_rank_open_adv15 = correlation(rank(df['open']), rank(adv15), 20)
+    corr_rank_high_adv15 = correlation(rank(df['high']), rank(adv15), 20)
     min_corr = np.minimum(corr_rank_open_adv15, corr_rank_high_adv15)
     ts_rank_min = apply_ts_function_by_stock(df, min_corr, ts_rank, 7)
     ts_rank_ts_rank = apply_ts_function_by_stock(df, ts_rank_min, ts_rank, 14)
-    decay_ts_rank = apply_ts_function_by_stock(df, ts_rank_ts_rank, decay_linear, 8)
-    rank_decay2 = cross_sectional_rank(df, decay_ts_rank)
+    decay_ts_rank = decay_linear(ts_rank_ts_rank, 8)
+    rank_decay2 = rank(decay_ts_rank)
     
     return rank_decay1 - rank_decay2
 
@@ -1688,17 +1684,17 @@ def alpha_099(df):
     close_open_weighted = (df['close'] * 0.60833) + (df['open'] * (1 - 0.60833))
     # 按股票分組計算 ts_sum
     sum_weighted = apply_ts_function_by_stock(df, close_open_weighted, ts_sum, 9)
-    adv60 = calculate_adv(df, 60)
+    adv60 = df['volume'].rolling(60).mean()
     sum_adv60 = apply_ts_function_by_stock(df, adv60, ts_sum, 9)
     # 按股票分組計算所有函數
     corr_sum_weighted_adv60 = apply_correlation_by_stock(df, sum_weighted, sum_adv60, 6)
-    rank_corr1 = cross_sectional_rank(df, corr_sum_weighted_adv60)
+    rank_corr1 = rank(corr_sum_weighted_adv60)
     
     high_low_avg = (df['high'] + df['low']) / 2
     ts_rank_hl = apply_ts_function_by_stock(df, high_low_avg, ts_rank, 12)
     ts_rank_volume = apply_ts_function_by_stock(df, 'volume', ts_rank, 11)
     corr_ts_rank = apply_correlation_by_stock(df, ts_rank_hl, ts_rank_volume, 6)
-    rank_corr2 = cross_sectional_rank(df, corr_ts_rank)
+    rank_corr2 = rank(corr_ts_rank)
     
     return rank_corr1 < rank_corr2
 
@@ -1709,11 +1705,11 @@ def alpha_100(df):
     denominator = df['high'] - df['low']
     ratio = numerator / denominator
     volume_ratio = ratio * df['volume']
-    rank_volume_ratio = cross_sectional_rank(df, volume_ratio)
+    rank_volume_ratio = rank(volume_ratio)
     scale_rank = scale(rank_volume_ratio, 1.5)
     
-    adv20 = calculate_adv(df, 20)
-    corr_close_rank_adv20 = apply_correlation_by_stock(df, df['close'], cross_sectional_rank(df, adv20), 5)
+    adv20 = df['volume'].rolling(20).mean()
+    corr_close_rank_adv20 = correlation(df['close'], rank(adv20), 5)
     high_low_avg = (df['high'] + df['low']) / 2
     diff_corr_avg = corr_close_rank_adv20 - high_low_avg
     scale_diff = scale(diff_corr_avg)
