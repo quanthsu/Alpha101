@@ -131,15 +131,19 @@ def sum(series, window):
 
 def calculate_vwap(df, window=None):
     """
-    計算成交量加權平均價 (VWAP)
+    計算成交量加權平均價 (VWAP) - 按股票分組
     
     參數:
-    df: DataFrame，需要包含 'open', 'high', 'low', 'close', 'volume' 欄位
+    df: DataFrame，需要包含 'stock_id', 'open', 'high', 'low', 'close', 'volume' 欄位
     window: 計算窗口，如果指定則只使用最近 window 天的數據，預設為 None（使用全部數據）
     
     返回:
     Series: VWAP 值
     """
+    # 確保 DataFrame 有 stock_id 欄位
+    if 'stock_id' not in df.columns:
+        raise ValueError("DataFrame 必須包含 'stock_id' 欄位")
+    
     # 計算典型價格 (Typical Price)
     typical_price = (df['high'] + df['low'] + df['close']) / 3
     
@@ -147,19 +151,19 @@ def calculate_vwap(df, window=None):
     price_volume = typical_price * df['volume']
     
     if window is not None:
-        # 使用滾動窗口計算 VWAP
+        # 使用滾動窗口計算 VWAP - 按股票分組
         # 計算滾動窗口的價格成交量總和
-        rolling_pv_sum = price_volume.rolling(window=window, min_periods=window).sum()
+        rolling_pv_sum = price_volume.groupby(df['stock_id']).rolling(window=window, min_periods=window).sum().reset_index(0, drop=True)
         # 計算滾動窗口的成交量總和
-        rolling_volume_sum = df['volume'].rolling(window=window, min_periods=window).sum()
+        rolling_volume_sum = df['volume'].groupby(df['stock_id']).rolling(window=window, min_periods=window).sum().reset_index(0, drop=True)
         # 計算 VWAP
         vwap = rolling_pv_sum / rolling_volume_sum
     else:
-        # 計算累積價格成交量乘積
-        cumulative_pv = price_volume.cumsum()
+        # 計算累積價格成交量乘積 - 按股票分組
+        cumulative_pv = price_volume.groupby(df['stock_id']).cumsum()
         
-        # 計算累積成交量
-        cumulative_volume = df['volume'].cumsum()
+        # 計算累積成交量 - 按股票分組
+        cumulative_volume = df['volume'].groupby(df['stock_id']).cumsum()
         
         # 計算 VWAP
         vwap = cumulative_pv / cumulative_volume
@@ -783,16 +787,16 @@ def alpha_027(df):
     term1 = (df['close'] - close_delay_3) / close_delay_3 * 100
     term2 = (df['close'] - close_delay_6) / close_delay_6 * 100
     
-    # WMA (Weighted Moving Average) 實現
-    def wma(series, window):
+    # WMA (Weighted Moving Average) 實現 - 按股票分組
+    def wma_by_stock(df, series, window):
         weights = np.arange(1, window + 1)
         def wma_func(x):
             if len(x) < window:
                 return np.nan
             return np.dot(x, weights) / weights.sum()
-        return series.rolling(window).apply(wma_func, raw=True)
+        return series.groupby(df['stock_id']).rolling(window).apply(wma_func, raw=True).reset_index(0, drop=True)
     
-    return wma(term1 + term2, 12) / 100
+    return wma_by_stock(df, term1 + term2, 12) / 100
 
 def alpha_028(df):
     """3*SMA((close-delay(low,1)-(high-delay(close,1)))/(high-low)*100,15,2)-2*SMA((close-delay(low,1)-(high-delay(close,1)))/(high-low)*100,15,2)*SMA((close-delay(low,1)-(high-delay(close,1)))/(high-low)*100,15,2)/30-SMA(((close-delay(low,1)-(high-delay(close,1)))/(high-low)*100,15,2),15,2)"""
@@ -805,12 +809,12 @@ def alpha_028(df):
     denominator = df['high'] - df['low']
     ratio = (numerator / denominator) * 100
     
-    # SMA (Simple Moving Average) 實現
-    def sma(series, window):
-        return series.rolling(window).mean()
+    # SMA (Simple Moving Average) 實現 - 按股票分組
+    def sma_by_stock(df, series, window):
+        return series.groupby(df['stock_id']).rolling(window).mean().reset_index(0, drop=True)
     
-    sma_ratio = sma(ratio, 15)
-    sma_sma_ratio = sma(sma_ratio, 15)
+    sma_ratio = sma_by_stock(df, ratio, 15)
+    sma_sma_ratio = sma_by_stock(df, sma_ratio, 15)
     
     return (3 * sma_ratio - 
             2 * sma_ratio * sma_ratio / 30 - 
@@ -1315,7 +1319,7 @@ def alpha_075(df):
 def alpha_076(df):
     """(max(rank(decay_linear(delta(vwap, 1.24383), 11.8259)), rank(decay_linear(Ts_Rank(correlation(IndNeutralize(low, IndClass.sector), adv81, 8.47141), 6.94124), 13.2504)))"""
     # 簡化實現，移除 IndNeutralize 函數
-    delta_vwap = delta(df['vwap'], 1)
+    delta_vwap = apply_ts_function_by_stock(df, 'vwap', delta, 1, period=1)
     decay_delta_vwap = apply_ts_function_by_stock(df, delta_vwap, decay_linear, 12)
     rank_decay1 = cross_sectional_rank(df, decay_delta_vwap)
     
@@ -1371,7 +1375,7 @@ def alpha_080(df):
     """((rank(Sign(delta(IndNeutralize(((open * 0.868128) + (high * (1 - 0.868128))), IndClass.industry), 4.04545)))^rank(correlation(high, adv10, 5.11456)))"""
     # 簡化實現，移除 IndNeutralize 函數
     open_high_weighted = (df['open'] * 0.868128) + (df['high'] * (1 - 0.868128))
-    delta_weighted = delta(open_high_weighted, 4)
+    delta_weighted = apply_ts_function_by_stock(df, open_high_weighted, delta, 4, period=4)
     sign_delta = np.sign(delta_weighted)
     
     adv10 = calculate_adv(df, 10)
@@ -1467,7 +1471,7 @@ def alpha_087(df):
     """(max(rank(decay_linear(delta(((close * 0.369701) + (vwap * (1 - 0.369701))), 2.72412), 2.72412)), Ts_Rank(decay_linear(abs(correlation(IndNeutralize(adv81, IndClass.industry), close, 13.4139)), 4.39567), 6.74588))"""
     # 簡化實現，移除 IndNeutralize 函數
     close_vwap_weighted = (df['close'] * 0.369701) + (df['vwap'] * (1 - 0.369701))
-    delta_weighted = delta(close_vwap_weighted, 3)
+    delta_weighted = apply_ts_function_by_stock(df, close_vwap_weighted, delta, 3, period=3)
     decay_delta = apply_ts_function_by_stock(df, delta_weighted, decay_linear, 3)
     rank_decay1 = cross_sectional_rank(df, decay_delta)
     
